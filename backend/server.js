@@ -243,6 +243,173 @@ app.patch("/api/inventory/:name", async (req, res) => {
   }
 });
 
+ // Record a sale and update the menu item's sales count
+app.post("/api/sales", async (req, res) => {
+  try {
+    const { ObjectId } = require("mongodb");
+    const { menuItemId, quantity } = req.body;
+
+    if (
+      typeof menuItemId !== "string" ||
+      !ObjectId.isValid(menuItemId) ||
+      !Number.isSafeInteger(quantity) ||
+      quantity <= 0
+    ) {
+      return res.status(400).json({
+        message: "Provide a valid menu item ID and positive whole-number quantity",
+      });
+    }
+
+    const menuCollection = db.collection("menu");
+    const salesCollection = db.collection("sales");
+
+    const menuItem = await menuCollection.findOne({
+      _id: new ObjectId(menuItemId),
+    });
+
+    if (!menuItem) {
+      return res.status(404).json({
+        message: "Menu item not found",
+      });
+    }
+
+    if (menuItem.status === "Unavailable") {
+      return res.status(400).json({
+        message: "This menu item is unavailable",
+      });
+    }
+
+    const result = await menuCollection.updateOne(
+      { _id: menuItem._id },
+      { $inc: { sales: quantity } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        message: "Menu item not found",
+      });
+    }
+
+    const sale = {
+      menuItemId: menuItem._id,
+      itemName: menuItem.name,
+      quantity,
+      unitPrice: menuItem.price,
+      total: menuItem.price * quantity,
+      recordedAt: new Date(),
+    };
+
+    await salesCollection.insertOne(sale);
+
+    res.status(201).json({
+      message: "Sale recorded successfully",
+      sale,
+      updatedSales: (menuItem.sales || 0) + quantity,
+    });
+  } catch (error) {
+    console.error("Record sale error:", error.message);
+    res.status(500).json({
+      message: "Could not record sale",
+    });
+  }
+});
+
+// Get recorded sales transactions
+app.get("/api/sales", async (req, res) => {
+  try {
+    const sales = await db
+      .collection("sales")
+      .find({})
+      .sort({ recordedAt: -1 })
+      .toArray();
+
+    res.json(sales);
+  } catch (error) {
+    console.error("Fetch sales error:", error.message);
+    res.status(500).json({
+      message: "Could not fetch sales",
+    });
+  }
+});
+// Record a sale
+app.post("/api/sales", async (req, res) => {
+  try {
+    const { ObjectId } = require("mongodb");
+    const { menuItemId, quantity } = req.body;
+
+    if (
+      typeof menuItemId !== "string" ||
+      !ObjectId.isValid(menuItemId) ||
+      !Number.isSafeInteger(quantity) ||
+      quantity <= 0
+    ) {
+      return res.status(400).json({
+        message: "Provide a valid menu item ID and positive quantity",
+      });
+    }
+
+    const menuCollection = db.collection("menu");
+    const menuItem = await menuCollection.findOne({
+      _id: new ObjectId(menuItemId),
+    });
+
+    if (!menuItem) {
+      return res.status(404).json({
+        message: "Menu item not found",
+      });
+    }
+
+    if (menuItem.status === "Unavailable") {
+      return res.status(400).json({
+        message: "This menu item is unavailable",
+      });
+    }
+
+    await menuCollection.updateOne(
+      { _id: menuItem._id },
+      { $inc: { sales: quantity } }
+    );
+
+    const sale = {
+      menuItemId: menuItem._id,
+      itemName: menuItem.name,
+      quantity,
+      unitPrice: menuItem.price,
+      total: menuItem.price * quantity,
+      recordedAt: new Date(),
+    };
+
+    await db.collection("sales").insertOne(sale);
+
+    res.status(201).json({
+      message: "Sale recorded successfully",
+      sale,
+    });
+  } catch (error) {
+    console.error("Record sale error:", error.message);
+    res.status(500).json({
+      message: "Could not record sale",
+    });
+  }
+});
+
+// Get recorded sales
+app.get("/api/sales", async (req, res) => {
+  try {
+    const sales = await db
+      .collection("sales")
+      .find({})
+      .sort({ recordedAt: -1 })
+      .toArray();
+
+    res.json(sales);
+  } catch (error) {
+    console.error("Fetch sales error:", error.message);
+    res.status(500).json({
+      message: "Could not fetch sales",
+    });
+  }
+});
 // Connect database, then start backend
 async function startServer() {
   try {

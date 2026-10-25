@@ -20,6 +20,16 @@ type InventoryItem = {
   minimum: number;
 };
 
+type Sale = {
+  _id?: string;
+  menuItemId: string;
+  itemName: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  recordedAt: string;
+};
+
 const initialInventory: InventoryItem[] = [
   { name: "Coffee Beans", unit: "kg", stock: 12, minimum: 5 },
   { name: "Milk", unit: "litres", stock: 8, minimum: 10 },
@@ -56,7 +66,12 @@ const [newItemName, setNewItemName] = useState("");
 const [newItemPrice, setNewItemPrice] = useState("");
 const [newItemCategory, setNewItemCategory] = useState("Coffee");
 const [savingMenuItem, setSavingMenuItem] = useState(false);
-
+const [showSaleForm, setShowSaleForm] = useState(false);
+const [selectedMenuItemId, setSelectedMenuItemId] = useState("");
+const [saleQuantity, setSaleQuantity] = useState("1");
+const [savingSale, setSavingSale] = useState(false);
+const [sales, setSales] = useState<Sale[]>([]);
+const [salesLoading, setSalesLoading] = useState(true);
   useEffect(() => {
     async function loadMenu() {
       try {
@@ -97,6 +112,28 @@ const [savingMenuItem, setSavingMenuItem] = useState(false);
     loadMenu();
   }, []);
 
+useEffect(() => {
+  async function loadSales() {
+    try {
+      const response = await fetch("http://localhost:5000/api/sales");
+
+      if (!response.ok) {
+        throw new Error("Failed to load sales");
+      }
+
+      const data: Sale[] = await response.json();
+      setSales(data);
+    } catch (error) {
+      console.error("Could not load sales:", error);
+      setNotice("Could not load sales from the backend.");
+    } finally {
+      setSalesLoading(false);
+    }
+  }
+
+  loadSales();
+}, []);
+
   useEffect(() => {
     async function loadInventory() {
       try {
@@ -134,6 +171,29 @@ const totalRecordedSales = menu.reduce(
   (sum, item) => sum + item.sales,
   0
 );
+
+const totalRevenue = sales.reduce(
+  (sum, sale) => sum + Number(sale.total || 0),
+  0
+);
+
+const transactionCount = sales.length;
+
+const salesByItem = sales.reduce<Record<string, number>>(
+  (totals, sale) => {
+    totals[sale.itemName] =
+      (totals[sale.itemName] || 0) + sale.quantity;
+    return totals;
+  },
+  {}
+);
+
+const bestSellingEntry = Object.entries(salesByItem).sort(
+  (a, b) => b[1] - a[1]
+)[0];
+
+const bestSellingItem = bestSellingEntry?.[0] ?? "No sales yet";
+const bestSellingQuantity = bestSellingEntry?.[1] ?? 0;
 
 const lowStockCount = lowStock.length;
 
@@ -355,7 +415,82 @@ async function addMenuItem() {
     setSavingMenuItem(false);
   }
 }
+async function recordSale() {
+  const quantity = Number(saleQuantity);
+  const selectedItem = menu.find(
+    (item) => String(item.id) === selectedMenuItemId
+  );
 
+  if (!selectedItem) {
+    setNotice("Please select a menu item.");
+    return;
+  }
+
+  if (
+    selectedItem.status !== "Available" ||
+    !Number.isSafeInteger(quantity) ||
+    quantity <= 0
+  ) {
+    setNotice("Select an available item and enter a positive whole quantity.");
+    return;
+  }
+
+  try {
+    setSavingSale(true);
+    setNotice("");
+
+    const response = await fetch("http://localhost:5000/api/sales", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        menuItemId: String(selectedItem.id),
+        quantity,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || "Could not record sale.");
+    }
+
+    setMenu((currentMenu) =>
+      currentMenu.map((item) =>
+        item.id === selectedItem.id
+          ? { ...item, sales: item.sales + quantity }
+          : item
+      )
+    );
+
+setSales((currentSales) => [
+  {
+    menuItemId: String(selectedItem.id),
+    itemName: selectedItem.name,
+    quantity,
+    unitPrice: selectedItem.price,
+    total: selectedItem.price * quantity,
+    recordedAt: new Date().toISOString(),
+  },
+  ...currentSales,
+]);
+
+    setSaleQuantity("1");
+    setShowSaleForm(false);
+    setNotice(
+      `Sale recorded: ${quantity} × ${selectedItem.name}.`
+    );
+  } catch (error) {
+    setNotice(
+      error instanceof Error
+        ? error.message
+        : "Could not record sale."
+    );
+  } finally {
+    setSavingSale(false);
+  }
+}
   function renderMenuTable(items: MenuItem[]) {
     return (
       <div className="table-wrap">
@@ -621,6 +756,76 @@ async function addMenuItem() {
                   </span>
                 </div>
               </div>
+
+              <div className="section-heading">
+                <div>
+                  <h2>Record a sale</h2>
+                  <p>Record units sold to update the sales total.</p>
+                </div>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() =>
+                    setShowSaleForm((current) => !current)
+                  }
+                >
+                  {showSaleForm ? "Cancel" : "+ Record Sale"}
+                </button>
+              </div>
+
+              {showSaleForm && (
+                <form
+                  className="toolbar"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void recordSale();
+                  }}
+                >
+                  <select
+                    value={selectedMenuItemId}
+                    onChange={(event) =>
+                      setSelectedMenuItemId(event.target.value)
+                    }
+                    aria-label="Select menu item"
+                    required
+                  >
+                    <option value="">Select menu item</option>
+                    {menu
+                      .filter(
+                        (item) => item.status === "Available"
+                      )
+                      .map((item) => (
+                        <option
+                          key={item.id}
+                          value={String(item.id)}
+                        >
+                          {item.name} — ₹{item.price}
+                        </option>
+                      ))}
+                  </select>
+
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={saleQuantity}
+                    onChange={(event) =>
+                      setSaleQuantity(event.target.value)
+                    }
+                    placeholder="Quantity sold"
+                    aria-label="Quantity sold"
+                    required
+                  />
+
+                  <button
+                    className="primary-button"
+                    type="submit"
+                    disabled={savingSale || menuLoading}
+                  >
+                    {savingSale ? "Recording..." : "Save Sale"}
+                  </button>
+                </form>
+              )}
 
               <div className="section-heading">
                 <div>
@@ -968,6 +1173,55 @@ async function addMenuItem() {
   Inventory records are loaded from MongoDB. Stock updates are saved to the database.
 </p>
 
+<div className="section-heading inventory-heading">
+  <div>
+    <h2>Restocking Recommendations</h2>
+    <p>
+      Ingredients below their minimum stock level need attention.
+    </p>
+  </div>
+</div>
+
+<div className="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>INGREDIENT</th>
+        <th>CURRENT STOCK</th>
+        <th>MINIMUM STOCK</th>
+        <th>RESTOCK NEEDED</th>
+      </tr>
+    </thead>
+    <tbody>
+      {lowStock.map((item) => (
+        <tr key={item.name}>
+          <td>
+            <strong>{item.name}</strong>
+          </td>
+          <td>
+            {item.stock} {item.unit}
+          </td>
+          <td>
+            {item.minimum} {item.unit}
+          </td>
+          <td>
+            <span className="status bad">
+              +{item.minimum - item.stock} {item.unit}
+            </span>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+
+  {lowStock.length === 0 && (
+    <div className="empty-state">
+      All ingredients meet their minimum stock levels.
+      No restocking is currently needed.
+    </div>
+  )}
+</div>
+
             </>
           )}
 
@@ -1067,6 +1321,40 @@ async function addMenuItem() {
       </div>
     </div>
 
+<div className="stats-grid">
+  <div className="stat-card">
+    <span>Recorded Revenue</span>
+    <h3>
+      {salesLoading
+        ? "Loading..."
+        : totalRevenue.toLocaleString("en-IN", {
+            style: "currency",
+            currency: "INR",
+            maximumFractionDigits: 2,
+          })}
+    </h3>
+    <p>Based on saved sale records</p>
+  </div>
+
+  <div className="stat-card">
+    <span>Transactions</span>
+    <h3>{salesLoading ? "Loading..." : transactionCount}</h3>
+    <p>Total recorded sale entries</p>
+  </div>
+
+  <div className="stat-card">
+    <span>Best-Selling Item</span>
+    <h3>
+      {salesLoading ? "Loading..." : bestSellingItem}
+    </h3>
+    <p>
+      {salesLoading
+        ? "Calculating..."
+        : `${bestSellingQuantity} units sold`}
+    </p>
+  </div>
+</div>
+
     <div className="report-grid">
       <div className="report-card">
         <span className="report-icon">☕</span>
@@ -1128,16 +1416,77 @@ async function addMenuItem() {
       </div>
     </div>
 
-    <div className="integration-note">
-      <strong>Data source and limitations</strong>
-      <p>
-        Menu and inventory summaries use data loaded from MongoDB.
-        Recorded sales are the values stored for each menu item;
-        they should not be treated as verified transaction totals.
-        Demand indicators are illustrative until the team's prediction
-        model is connected.
-      </p>
-    </div>
+<div className="section-heading">
+  <div>
+    <h2>Recent Sales Transactions</h2>
+    <p>Latest recorded sales saved in MongoDB.</p>
+  </div>
+</div>
+
+<div className="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>ITEM</th>
+        <th>QUANTITY</th>
+        <th>UNIT PRICE</th>
+        <th>TOTAL</th>
+        <th>DATE & TIME</th>
+      </tr>
+    </thead>
+    <tbody>
+      {sales.slice(0, 10).map((sale, index) => (
+        <tr key={sale._id ?? `${sale.itemName}-${sale.recordedAt}-${index}`}>
+          <td>
+            <strong>{sale.itemName}</strong>
+          </td>
+          <td>{sale.quantity}</td>
+          <td>
+            {Number(sale.unitPrice).toLocaleString("en-IN", {
+              style: "currency",
+              currency: "INR",
+            })}
+          </td>
+          <td className="price">
+            {Number(sale.total).toLocaleString("en-IN", {
+              style: "currency",
+              currency: "INR",
+            })}
+          </td>
+          <td>
+            {new Date(sale.recordedAt).toLocaleString("en-IN", {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+
+  {salesLoading ? (
+    <div className="empty-state">Loading sales...</div>
+  ) : sales.length === 0 ? (
+    <div className="empty-state">No sales transactions recorded yet.</div>
+  ) : (
+    <p className="table-footer">
+      Showing {Math.min(sales.length, 10)} of {sales.length} transactions.
+    </p>
+  )}
+</div>
+
+    
+<div className="integration-note">
+  <strong>Data source and limitations</strong>
+  <p>
+    Menu and inventory summaries use data loaded from MongoDB.
+    Revenue and transaction count are calculated from saved records
+    in the sales collection. Item-level sales counts are maintained
+    separately on menu documents. Demand predictions remain
+    illustrative until the team's prediction model is connected.
+  </p>
+</div>
+
   </>
 )}
 
