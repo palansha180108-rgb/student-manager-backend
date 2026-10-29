@@ -14,6 +14,7 @@ type MenuItem = {
 };
 
 type InventoryItem = {
+  _id?: string;
   name: string;
   unit: string;
   stock: number;
@@ -73,90 +74,139 @@ const [savingSale, setSavingSale] = useState(false);
 const [sales, setSales] = useState<Sale[]>([]);
 const [salesLoading, setSalesLoading] = useState(true);
   useEffect(() => {
-    async function loadMenu() {
-      try {
-        const response = await fetch("http://localhost:5000/api/menu");
-        if (!response.ok) {
-          throw new Error("Failed to load menu");
-        }
+  async function loadMenu() {
+    try {
+      const response = await fetch("http://localhost:3002/api/products");
+      const data = await response.json();
 
-        const data = await response.json();
-
-        setMenu(
-          data.map(
-            (item: {
-              _id: string;
-              name: string;
-              category: string;
-              price: number;
-              sales?: number;
-              status?: "Available" | "Unavailable";
-            }) => ({
-              id: item._id,
-              name: item.name,
-              category: item.category,
-              price: item.price,
-              sales: item.sales ?? 0,
-              status: item.status ?? "Available",
-            })
-          )
-        );
-      } catch (error) {
-        console.error("Could not load menu:", error);
-        setNotice("Could not load menu from the backend.");
-      } finally {
-        setMenuLoading(false);
+      if (!response.ok || !data.success || !Array.isArray(data.products)) {
+        throw new Error(data.message || "Failed to load menu.");
       }
-    }
 
-    loadMenu();
-  }, []);
+      setMenu(
+        data.products.map(
+          (item: {
+            _id: string;
+            name: string;
+            category: string;
+            price: number;
+            isAvailable: boolean;
+            sales?: number;
+          }) => ({
+            id: item._id,
+            name: item.name,
+            category: item.category,
+            price: item.price,
+            sales: item.sales ?? 0,
+            status: item.isAvailable ? "Available" : "Unavailable",
+          })
+        )
+      );
+    } catch (error) {
+      console.error("Could not load menu:", error);
+      setNotice("Could not load menu from the backend.");
+    } finally {
+      setMenuLoading(false);
+    }
+  }
+
+  void loadMenu();
+}, []);
 
 useEffect(() => {
   async function loadSales() {
     try {
-      const response = await fetch("http://localhost:5000/api/sales");
+      const response = await fetch("http://localhost:3002/api/sales");
+      const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error("Failed to load sales");
+      if (!response.ok || !data.success || !Array.isArray(data.sales)) {
+        throw new Error(data.message || "Failed to load sales.");
       }
 
-      const data: Sale[] = await response.json();
-      setSales(data);
+      const savedSales: Sale[] = data.sales.map(
+  (sale: {
+    _id: string;
+    menuItemId?: string | { _id: string };
+    productId?: string | { _id: string };
+    itemName: string;
+    quantity: number;
+    unitPrice: number;
+    total: number;
+    recordedAt: string;
+  }) => {
+    const savedProductId = sale.productId ?? sale.menuItemId;
+
+    return {
+      _id: sale._id,
+      menuItemId:
+        typeof savedProductId === "string"
+          ? savedProductId
+          : savedProductId?._id ?? "",
+      itemName: sale.itemName,
+      quantity: sale.quantity,
+      unitPrice: sale.unitPrice,
+      total: sale.total,
+      recordedAt: sale.recordedAt,
+    };
+  }
+);
+
+
+
+      setSales(savedSales);
     } catch (error) {
       console.error("Could not load sales:", error);
-      setNotice("Could not load sales from the backend.");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Could not load sales from the backend."
+      );
     } finally {
       setSalesLoading(false);
     }
   }
 
-  loadSales();
+  void loadSales();
 }, []);
 
+
   useEffect(() => {
-    async function loadInventory() {
-      try {
-        const response = await fetch(
-          "http://localhost:5000/api/inventory"
-        );
+  async function loadInventory() {
+    try {
+      const response = await fetch("http://localhost:3002/api/inventory");
+      const data = await response.json();
 
-        if (!response.ok) {
-          throw new Error("Failed to load inventory");
-        }
-
-        const data: InventoryItem[] = await response.json();
-        setInventory(data);
-      } catch (error) {
-        console.error("Could not load inventory:", error);
-        setNotice("Could not load inventory from the backend.");
-      } finally {
-        setInventoryLoading(false);
+      if (!response.ok || !data.success || !Array.isArray(data.items)) {
+        throw new Error(data.message || "Failed to load inventory.");
       }
-    }
 
-    loadInventory();
-  }, []);
+      setInventory(
+        data.items.map(
+          (item: {
+            _id: string;
+            name: string;
+            unit: string;
+            quantity: number;
+            lowStockThreshold: number;
+          }) => ({
+            _id: item._id,
+            name: item.name,
+            unit: item.unit,
+            stock: item.quantity,
+            minimum: item.lowStockThreshold,
+          })
+        )
+      );
+    } catch (error) {
+      console.error("Could not load inventory:", error);
+      setNotice("Could not load inventory from the backend.");
+    } finally {
+      setInventoryLoading(false);
+    }
+  }
+
+  void loadInventory();
+}, []);
 
   const lowStock = inventory.filter(
     (item) => item.stock < item.minimum
@@ -254,12 +304,14 @@ const healthyStockCount = inventory.length - lowStockCount;
   }
 
   
+
 async function updateStock(index: number) {
   const quantity = Number(newStock);
-  const item = inventory[index];
+  const item = inventory[index] as InventoryItem & { _id?: string };
 
   if (
     !item ||
+    !item._id ||
     newStock.trim() === "" ||
     !Number.isFinite(quantity) ||
     quantity < 0
@@ -272,13 +324,13 @@ async function updateStock(index: number) {
     setNotice("");
 
     const response = await fetch(
-      `http://localhost:5000/api/inventory/${encodeURIComponent(item.name)}`,
+      `http://localhost:3002/api/inventory/${encodeURIComponent(item._id)}`,
       {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ stock: quantity }),
+        body: JSON.stringify({ quantity }),
       }
     );
 
@@ -293,7 +345,7 @@ async function updateStock(index: number) {
     setInventory((current) =>
       current.map((currentItem) =>
         currentItem.name === item.name
-          ? { ...currentItem, stock: data.stock }
+          ? { ...currentItem, stock: data.item.quantity }
           : currentItem
       )
     );
@@ -311,40 +363,41 @@ async function updateStock(index: number) {
 }
 
 
+
   
 async function toggleAvailability(id: string | number) {
   const item = menu.find((current) => current.id === id);
   if (!item) return;
 
-  const nextStatus =
-    item.status === "Available" ? "Unavailable" : "Available";
+  const isAvailable = item.status !== "Available";
 
   try {
     setNotice("");
 
     const response = await fetch(
-      `http://localhost:5000/api/menu/${encodeURIComponent(String(id))}`,
+      `http://localhost:3002/api/products/${encodeURIComponent(String(id))}`,
       {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: nextStatus }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isAvailable }),
       }
     );
 
     const data = await response.json();
 
-    if (!response.ok) {
-      throw new Error(
-        data.message || "Could not update menu availability."
-      );
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || "Could not update availability.");
     }
 
     setMenu((current) =>
       current.map((currentItem) =>
         currentItem.id === id
-          ? { ...currentItem, status: data.status }
+          ? {
+              ...currentItem,
+              status: data.product.isAvailable
+                ? "Available"
+                : "Unavailable",
+            }
           : currentItem
       )
     );
@@ -352,9 +405,7 @@ async function toggleAvailability(id: string | number) {
     setNotice("Menu availability saved to MongoDB.");
   } catch (error) {
     setNotice(
-      error instanceof Error
-        ? error.message
-        : "Could not update menu availability."
+      error instanceof Error ? error.message : "Could not update availability."
     );
   }
 }
@@ -365,7 +416,13 @@ async function addMenuItem() {
   const price = Number(newItemPrice);
   const itemCategory = newItemCategory.trim();
 
-  if (!name || !newItemPrice || !itemCategory || !Number.isFinite(price) || price <= 0) {
+  if (
+    !name ||
+    newItemPrice.trim() === "" ||
+    !itemCategory ||
+    !Number.isFinite(price) ||
+    price <= 0
+  ) {
     setNotice("Enter a valid name, category, and price.");
     return;
   }
@@ -374,31 +431,34 @@ async function addMenuItem() {
     setSavingMenuItem(true);
     setNotice("");
 
-    const response = await fetch("http://localhost:5000/api/menu", {
+    const response = await fetch("http://localhost:3002/api/products", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name,
         price,
         category: itemCategory,
+        isAvailable: true,
       }),
     });
 
-    if (!response.ok) {
-      throw new Error("Could not save the menu item.");
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || "Could not save the menu item.");
     }
 
-    const savedItem = await response.json();
+    const savedItem = data.product;
 
-    setMenu((currentMenu) => [
-      ...currentMenu,
+    setMenu((current) => [
+      ...current,
       {
         id: savedItem._id,
         name: savedItem.name,
         price: savedItem.price,
         category: savedItem.category,
         sales: 0,
-        status: "Available",
+        status: savedItem.isAvailable ? "Available" : "Unavailable",
       },
     ]);
 
@@ -409,7 +469,7 @@ async function addMenuItem() {
     setNotice("Menu item added successfully!");
   } catch (error) {
     setNotice(
-      error instanceof Error ? error.message : "Something went wrong."
+      error instanceof Error ? error.message : "Could not add menu item."
     );
   } finally {
     setSavingMenuItem(false);
@@ -439,59 +499,85 @@ async function recordSale() {
     setSavingSale(true);
     setNotice("");
 
-    const response = await fetch("http://localhost:5000/api/sales", {
+    const response = await fetch("http://localhost:3002/api/sales", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        menuItemId: String(selectedItem.id),
+        productId: String(selectedItem.id),
         quantity,
       }),
     });
 
     const data = await response.json();
 
-    if (!response.ok) {
+    if (!response.ok || !data.success) {
       throw new Error(data.message || "Could not record sale.");
     }
 
+    const salesResponse = await fetch("http://localhost:3002/api/sales");
+    const salesData = await salesResponse.json();
+
+    if (
+      !salesResponse.ok ||
+      !salesData.success ||
+      !Array.isArray(salesData.sales)
+    ) {
+      throw new Error("Sale was saved, but the sales list could not be refreshed. Reload the dashboard.");
+    }
+
+    
+setSales(
+  salesData.sales.map(
+    (sale: {
+      _id: string;
+      productId?: string | { _id: string };
+      menuItemId?: string | { _id: string };
+      itemName: string;
+      quantity: number;
+      unitPrice: number;
+      total: number;
+      recordedAt: string;
+    }) => {
+      const savedProductId = sale.productId ?? sale.menuItemId;
+
+      return {
+        _id: sale._id,
+        menuItemId:
+          typeof savedProductId === "string"
+            ? savedProductId
+            : savedProductId?._id ?? "",
+        itemName: sale.itemName,
+        quantity: sale.quantity,
+        unitPrice: sale.unitPrice,
+        total: sale.total,
+        recordedAt: sale.recordedAt,
+      };
+    }
+  )
+);
+
+
     setMenu((currentMenu) =>
       currentMenu.map((item) =>
-        item.id === selectedItem.id
+        String(item.id) === String(selectedItem.id)
           ? { ...item, sales: item.sales + quantity }
           : item
       )
     );
 
-setSales((currentSales) => [
-  {
-    menuItemId: String(selectedItem.id),
-    itemName: selectedItem.name,
-    quantity,
-    unitPrice: selectedItem.price,
-    total: selectedItem.price * quantity,
-    recordedAt: new Date().toISOString(),
-  },
-  ...currentSales,
-]);
-
     setSaleQuantity("1");
     setShowSaleForm(false);
-    setNotice(
-      `Sale recorded: ${quantity} × ${selectedItem.name}.`
-    );
+    setNotice(`Sale recorded: ${quantity} × ${selectedItem.name}.`);
   } catch (error) {
     setNotice(
-      error instanceof Error
-        ? error.message
-        : "Could not record sale."
+      error instanceof Error ? error.message : "Could not record sale."
     );
   } finally {
     setSavingSale(false);
   }
-}
-  function renderMenuTable(items: MenuItem[]) {
+}function renderMenuTable(items: MenuItem[]) {
     return (
       <div className="table-wrap">
       
@@ -1499,3 +1585,5 @@ setSales((currentSales) => [
     </main>
   );
 }
+
+

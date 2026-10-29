@@ -42,3 +42,10 @@ next-env.d.ts
 # Backend dependencies and secrets
 backend/node_modules/
 backend/.env
+# Dependencies and build output in all apps
+**/node_modules/
+**/.next/
+
+
+# Local safety backups
+**/*.before-*.bak
