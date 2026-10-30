@@ -2,6 +2,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { Product as SharedProduct } from "@shared/types/product";
+import type { InventoryItem as SharedInventoryItem } from "@shared/types/inventory";
 import "./dashboard.css";
 
 type MenuItem = {
@@ -85,14 +87,7 @@ const [salesLoading, setSalesLoading] = useState(true);
 
       setMenu(
         data.products.map(
-          (item: {
-            _id: string;
-            name: string;
-            category: string;
-            price: number;
-            isAvailable: boolean;
-            sales?: number;
-          }) => ({
+          (item: SharedProduct) => ({
             id: item._id,
             name: item.name,
             category: item.category,
@@ -181,14 +176,8 @@ useEffect(() => {
       }
 
       setInventory(
-        data.items.map(
-          (item: {
-            _id: string;
-            name: string;
-            unit: string;
-            quantity: number;
-            lowStockThreshold: number;
-          }) => ({
+          data.items.map(
+  (item: SharedInventoryItem) => ({
             _id: item._id,
             name: item.name,
             unit: item.unit,
@@ -217,8 +206,8 @@ useEffect(() => {
 
 const unavailableMenuCount = menu.length - availableMenuCount;
 
-const totalRecordedSales = menu.reduce(
-  (sum, item) => sum + item.sales,
+const totalRecordedSales = sales.reduce(
+  (sum, sale) => sum + Number(sale.quantity || 0),
   0
 );
 
@@ -833,10 +822,8 @@ setSales(
                     <span className="stat-icon blue">↗</span>
                   </div>
                   <strong className="stat-value">
-                    {menu
-                      .reduce((sum, item) => sum + item.sales, 0)
-                      .toLocaleString("en-IN")}
-                  </strong>
+  {salesLoading ? "Loading..." : totalRecordedSales.toLocaleString("en-IN")}
+</strong>
                   <span className="stat-foot">
                     Recorded units across menu items
                   </span>
